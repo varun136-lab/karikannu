@@ -11,6 +11,11 @@
 html { background: #f6f4f0; }
 body { margin: 0; }
 
+/* Prevent hairline seams between stacked full-bleed sections on high-DPI mobile
+   screens (subpixel rounding can leave a fraction-of-a-pixel gap that renders
+   as a visible line). A tiny overlap removes any gap for content to show through. */
+#page > section { margin-bottom: -2px; }
+
 ::selection { background: #8a1414; color: #f0e2d0; }
 
 @keyframes ret2-drift { 0%,100%{transform:translateY(0)} 50%{transform:translateY(8px)} }
