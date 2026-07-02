@@ -127,24 +127,44 @@
       });
       return out.length ? out : [host];
     };
+    // will-change is applied only for the brief moment an element is actually
+    // animating, then released — leaving it on permanently pins every revealed
+    // card in GPU memory for the rest of the session, which is what was making
+    // scrolling feel stuck/sticky on mobile once several sections had revealed.
+    const releaseWillChange = (k) => { k.style.willChange = 'auto'; };
     const hide = (k) => { k.style.opacity = '0'; k.style.transform = 'translateY(22px)'; };
-    const show = (k) => { k.style.opacity = '1'; k.style.transform = 'none'; };
+    const show = (k) => {
+      k.style.willChange = 'opacity, transform';
+      k.style.opacity = '1';
+      k.style.transform = 'none';
+      k.addEventListener('transitionend', () => releaseWillChange(k), { once: true });
+      // safety net in case transitionend never fires (e.g. element hidden via display:none elsewhere)
+      setTimeout(() => releaseWillChange(k), 1200);
+    };
     const vh = window.innerHeight || 800;
     const units = [];
     Array.from(root.querySelectorAll('[data-reveal]')).forEach((host) => {
       unitsOf(host).forEach((k, i) => {
-        k.style.willChange = 'opacity, transform';
         const d = (i % 3) * 80;
         k.style.transition = `opacity .7s ${EASE} ${d}ms, transform .8s ${EASE} ${d}ms`;
         units.push(k);
       });
     });
     if (reduceMotion) {
-      units.forEach(show);
+      units.forEach((k) => { k.style.opacity = '1'; k.style.transform = 'none'; });
     } else {
       units.forEach((k) => {
         const r = k.getBoundingClientRect();
-        if (r.top < vh * 0.92 && r.bottom > 0) { show(k); k._shown = true; } else { hide(k); }
+        // already-visible units are shown instantly with no transition/will-change at all —
+        // they never animate, so there's nothing to promote to a GPU layer for.
+        if (r.top < vh * 0.92 && r.bottom > 0) {
+          k.style.transition = 'none';
+          k.style.opacity = '1';
+          k.style.transform = 'none';
+          k._shown = true;
+        } else {
+          hide(k);
+        }
       });
       const io = new IntersectionObserver((es) => {
         es.forEach((en) => { if (en.isIntersecting) { show(en.target); io.unobserve(en.target); } });
