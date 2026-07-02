@@ -66,16 +66,44 @@
     window.addEventListener('resize', onScroll, { passive: true });
     apply();
 
-    // ---- pupil follows cursor ----
-    const onMove = (e) => {
-      const cx = e.clientX / window.innerWidth - 0.5;
-      const cy = e.clientY / window.innerHeight - 0.5;
-      root.querySelectorAll('[data-pupil]').forEach((p) => {
-        const amt = parseFloat(p.getAttribute('data-pupil')) || 7;
-        p.style.transform = `translate(${(cx * amt).toFixed(2)}px, ${(cy * amt).toFixed(2)}px)`;
-      });
+    // ---- pupil follows cursor / finger, with idle drift ----
+    let pupilTarget = { x: 0, y: 0 };
+    let pupilCur = { x: 0, y: 0 };
+    let lastPointer = 0;
+
+    const setTargetFromPoint = (clientX, clientY) => {
+      pupilTarget.x = clientX / window.innerWidth - 0.5;
+      pupilTarget.y = clientY / window.innerHeight - 0.5;
+      lastPointer = performance.now();
+    };
+    const onMove = (e) => setTargetFromPoint(e.clientX, e.clientY);
+    const onTouch = (e) => {
+      const t = e.touches && e.touches[0];
+      if (t) setTargetFromPoint(t.clientX, t.clientY);
     };
     window.addEventListener('mousemove', onMove, { passive: true });
+    window.addEventListener('touchmove', onTouch, { passive: true });
+    window.addEventListener('touchstart', onTouch, { passive: true });
+
+    // rAF loop: ease pupil toward target; when no pointer for a bit, drift on a slow lissajous
+    const pupils = Array.from(root.querySelectorAll('[data-pupil]'));
+    let pupilRAF = null;
+    const tick = (now) => {
+      const idle = now - lastPointer > 2200;
+      if (idle) {
+        const s = now / 1000;
+        pupilTarget.x = Math.sin(s * 0.6) * 0.42;
+        pupilTarget.y = Math.sin(s * 0.9 + 1.3) * 0.32;
+      }
+      pupilCur.x += (pupilTarget.x - pupilCur.x) * 0.08;
+      pupilCur.y += (pupilTarget.y - pupilCur.y) * 0.08;
+      pupils.forEach((p) => {
+        const amt = parseFloat(p.getAttribute('data-pupil')) || 7;
+        p.style.transform = `translate(${(pupilCur.x * amt).toFixed(2)}px, ${(pupilCur.y * amt).toFixed(2)}px)`;
+      });
+      pupilRAF = requestAnimationFrame(tick);
+    };
+    pupilRAF = requestAnimationFrame(tick);
 
     // ---- reveal on scroll: each block/card fades + rises as it personally enters view ----
     const EASE = 'cubic-bezier(.22,.61,.36,1)';
