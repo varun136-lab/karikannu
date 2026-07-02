@@ -27,6 +27,8 @@
     const eyeLabel = root.querySelector('[data-eyelabel]');
     const eyeRedEl = root.querySelector('[data-eyered]');
     const veinsEl = root.querySelector('[data-veins]');
+    const sunkenEl = root.querySelector('[data-sunken]');
+    const sunkenSec = sunkenEl ? sunkenEl.closest('section') : null;
 
     const apply = () => {
       const doc = document.documentElement;
@@ -47,6 +49,16 @@
       if (veinsEl) veinsEl.style.opacity = (tint * 0.9).toFixed(3);
       if (eyeLabel) eyeLabel.style.opacity = (tint).toFixed(3);
       if (barEl) barEl.style.width = (t * 100).toFixed(2) + '%';
+      if (sunkenEl && sunkenSec) {
+        const r = sunkenSec.getBoundingClientRect();
+        const vhh = window.innerHeight || 800;
+        // 0 as the section enters from the bottom, 1 as it exits the top
+        let p = (vhh - r.top) / (vhh + r.height);
+        p = Math.max(0, Math.min(1, p));
+        // fall the full section height, then overflow:hidden clips it behind the next section
+        const fall = p * r.height;
+        sunkenEl.style.transform = `translateY(${fall.toFixed(1)}px) rotate(${(p * 5).toFixed(2)}deg)`;
+      }
     };
     let ticking = false;
     const onScroll = () => { if (ticking) return; ticking = true; requestAnimationFrame(() => { ticking = false; apply(); }); };
@@ -65,36 +77,58 @@
     };
     window.addEventListener('mousemove', onMove, { passive: true });
 
-    // ---- reveal on scroll: staggered fade + rise + de-blur (titles cascade in) ----
+    // ---- reveal on scroll: each block/card fades + rises as it personally enters view ----
     const EASE = 'cubic-bezier(.22,.61,.36,1)';
-    const rev = Array.from(root.querySelectorAll('[data-reveal]'));
-    const kidsOf = (el) => {
-      let ks = Array.from(el.children);
-      // one level deeper if the block is a single wrapper (e.g. a centering div)
-      if (ks.length === 1 && ks[0].children.length > 1) ks = Array.from(ks[0].children);
-      return ks.length ? ks : [el];
+    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const isWrap = (el) => {
+      const d = getComputedStyle(el).display;
+      return (d === 'flex' || d === 'grid') && el.childElementCount > 1;
     };
-    const prep = (el) => {
-      el._rk = kidsOf(el);
-      el._rk.forEach((k, i) => {
-        k.style.willChange = 'opacity, transform, filter';
-        const d = Math.min(i * 85, 620);
-        k.style.transition = `opacity .85s ${EASE} ${d}ms, transform 1s ${EASE} ${d}ms, filter 1s ${EASE} ${d}ms`;
+    const unitsOf = (host) => {
+      let top = Array.from(host.children).filter((c) => c.nodeType === 1);
+      // step into a single wrapper (e.g. a centering div)
+      if (top.length === 1 && top[0].childElementCount > 1) top = Array.from(top[0].children);
+      const out = [];
+      top.forEach((c) => {
+        // expand a row/grid of cards so each card fades as it enters, not all at once
+        if (isWrap(c) && c.childElementCount >= 3) {
+          Array.from(c.children).forEach((g) => { if (g.nodeType === 1) out.push(g); });
+        } else {
+          out.push(c);
+        }
       });
+      return out.length ? out : [host];
     };
-    const hide = (el) => { el._rk.forEach(k => { k.style.opacity = '0'; k.style.transform = 'translateY(34px)'; k.style.filter = 'blur(6px)'; }); };
-    const show = (el) => { el._rk.forEach(k => { k.style.opacity = '1'; k.style.transform = 'none'; k.style.filter = 'none'; }); };
+    const hide = (k) => { k.style.opacity = '0'; k.style.transform = 'translateY(22px)'; };
+    const show = (k) => { k.style.opacity = '1'; k.style.transform = 'none'; };
     const vh = window.innerHeight || 800;
-    rev.forEach(prep);
-    rev.forEach((el) => {
-      const r = el.getBoundingClientRect();
-      if (r.top < vh * 0.9 && r.bottom > 0) { show(el); el._shown = true; } else { hide(el); }
+    const units = [];
+    Array.from(root.querySelectorAll('[data-reveal]')).forEach((host) => {
+      unitsOf(host).forEach((k, i) => {
+        k.style.willChange = 'opacity, transform';
+        const d = (i % 3) * 80;
+        k.style.transition = `opacity .7s ${EASE} ${d}ms, transform .8s ${EASE} ${d}ms`;
+        units.push(k);
+      });
     });
-    const io = new IntersectionObserver((es) => {
-      es.forEach((en) => { if (en.isIntersecting) { show(en.target); io.unobserve(en.target); } });
-    }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
-    rev.forEach((el) => { if (!el._shown) io.observe(el); });
-    // failsafe: never leave content hidden
-    setTimeout(() => rev.forEach(show), 2600);
+    if (reduceMotion) {
+      units.forEach(show);
+    } else {
+      units.forEach((k) => {
+        const r = k.getBoundingClientRect();
+        if (r.top < vh * 0.92 && r.bottom > 0) { show(k); k._shown = true; } else { hide(k); }
+      });
+      const io = new IntersectionObserver((es) => {
+        es.forEach((en) => { if (en.isIntersecting) { show(en.target); io.unobserve(en.target); } });
+      }, { threshold: 0.12, rootMargin: '0px 0px -10% 0px' });
+      units.forEach((k) => { if (!k._shown) io.observe(k); });
+      // targeted safety: reveal only items already at/above the fold that IO may have missed
+      setTimeout(() => {
+        units.forEach((k) => {
+          if (k._shown) return;
+          if (k.getBoundingClientRect().top < (window.innerHeight || 800)) show(k);
+        });
+      }, 3500);
+    }
   });
 })();
