@@ -1,0 +1,16 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "karikannu",
+	"compatibility_date": "2026-07-02",
+	"observability": {
+		"enabled": true
+	},
+	"assets": {
+		"directory": "site"
+	},
+	"compatibility_flags": ["nodejs_compat"],
+	"workers_dev": false,
+	"routes": [
+		{ "pattern": "karikannu.com", "custom_domain": true }
+	]
+}
