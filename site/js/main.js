@@ -150,11 +150,15 @@
       [...bySec.keys()].forEach((sec) => animIO.observe(sec));
     }
 
-    // ---- pupil follows cursor / finger ONLY ----
+    // ---- pupil follows cursor ONLY (mouse, not touch) ----
+    // On mobile the pupil used to chase your finger via touchmove/touchstart, which meant
+    // every touch-driven scroll gesture was also firing pupil-tracking writes on the same
+    // fixed, filtered, blend-mode eye layer. Reverted to mouse-only: touch devices don't
+    // fire mousemove at all, so the eye just stays put while scrolling on a phone.
     // No idle animation and no CSS transition: the eye sits in a fixed, filtered, blend-mode
     // layer, so ANY pupil movement forces that whole layer to repaint. We therefore move it
-    // only in direct response to input (rAF-coalesced) — while you're scrolling and not
-    // touching the eye, the pupil is completely static and costs nothing.
+    // only in direct response to input (rAF-coalesced) — while you're moving the mouse and
+    // not touching the eye, the pupil is completely static and costs nothing.
     const pupils = [...root.querySelectorAll('[data-pupil]')];
 
     let writeQueued = false, pendX = 0, pendY = 0;
@@ -172,14 +176,8 @@
     };
 
     const onMove = (e) => writePupil(e.clientX / window.innerWidth - 0.5, e.clientY / window.innerHeight - 0.5);
-    const onTouch = (e) => {
-      const t = e.touches && e.touches[0];
-      if (t) writePupil(t.clientX / window.innerWidth - 0.5, t.clientY / window.innerHeight - 0.5);
-    };
     if (!isOff('pupil')) {
       window.addEventListener('mousemove', onMove, { passive: true });
-      window.addEventListener('touchmove', onTouch, { passive: true });
-      window.addEventListener('touchstart', onTouch, { passive: true });
     }
 
     // ---- reveal on scroll: each block/card fades + rises as it personally enters view ----
