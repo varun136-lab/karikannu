@@ -9,6 +9,16 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<script>
+// TEMP DIAGNOSTIC: ?disable=paint (or ?disable=all) strips mix-blend-mode / box-shadow / filter
+// site-wide via CSS so we can A/B test whether paint/raster cost from those effects is behind
+// the reported trackpad stickiness. Runs before first paint so there's no flash. Remove once
+// the cause is confirmed -- inert when the param is absent.
+(function () {
+  var p = (new URLSearchParams(location.search).get('disable') || '').split(',');
+  if (p.indexOf('all') !== -1 || p.indexOf('paint') !== -1) document.documentElement.classList.add('diag-nopaint');
+})();
+</script>
 </head>
 <body>
 
