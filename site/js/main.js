@@ -3,6 +3,14 @@
     const root = document;
     const rootEl = document.getElementById('page');
 
+    // ---- TEMP DIAGNOSTIC: ?disable=color,warmup,reveal,animpause,pupil (or ?disable=all) ----
+    // Lets us A/B individual subsystems live against the reported trackpad "sticky, need a
+    // second swipe after pausing" symptom without a redeploy per hypothesis. Safe to remove
+    // once the cause is found -- nothing here changes default behavior when the param is absent.
+    const __diagParams = new URLSearchParams(location.search);
+    const __disabled = new Set((__diagParams.get('disable') || '').split(',').map((s) => s.trim()).filter(Boolean));
+    const isOff = (name) => __disabled.has('all') || __disabled.has(name);
+
     // ---- color escalation model ----
     const mix = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
     const pw = (stops, t) => {
@@ -87,10 +95,12 @@
     let ticking = false;
     const onScroll = () => { if (ticking) return; ticking = true; requestAnimationFrame(() => { ticking = false; apply(); }); };
     const onResize = () => { measure(); onScroll(); };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onResize, { passive: true });
-    // reveal transitions change section heights as they fade in — refresh cached geometry after they settle
-    setTimeout(measure, 1600);
+    if (!isOff('color')) {
+      window.addEventListener('scroll', onScroll, { passive: true });
+      window.addEventListener('resize', onResize, { passive: true });
+      // reveal transitions change section heights as they fade in — refresh cached geometry after they settle
+      setTimeout(measure, 1600);
+    }
     apply();
 
     // ---- warm-up: fetch + decode every image during idle time shortly after load,
@@ -102,25 +112,27 @@
     // gesture, which looks exactly like a scroll needing a second swipe to continue.
     // requestIdleCallback is deferred automatically while the thread is busy handling
     // scroll/input, and the timeout option guarantees it still runs eventually.
-    const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200));
-    ric(() => {
-      const imgs = [...root.querySelectorAll('img')];
-      let i = 0;
-      const next = () => {
-        if (i >= imgs.length) return;
-        const im = imgs[i++];
-        im.loading = 'eager';
-        const p = im.decode ? im.decode().catch(() => {}) : Promise.resolve();
-        p.then(() => { ric(next, { timeout: 1000 }); });
-      };
-      next();
-    }, { timeout: 2000 });
+    if (!isOff('warmup')) {
+      const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200));
+      ric(() => {
+        const imgs = [...root.querySelectorAll('img')];
+        let i = 0;
+        const next = () => {
+          if (i >= imgs.length) return;
+          const im = imgs[i++];
+          im.loading = 'eager';
+          const p = im.decode ? im.decode().catch(() => {}) : Promise.resolve();
+          p.then(() => { ric(next, { timeout: 1000 }); });
+        };
+        next();
+      }, { timeout: 2000 });
+    }
 
     // ---- pause infinite jitter/glitch animations while their section is offscreen ----
     // They otherwise animate transform/clip-path continuously for the whole page lifetime,
     // keeping the compositor busy and stealing frames from scrolling.
     const animEls = [...root.querySelectorAll('section [style]')].filter((el) => el.style.animationName || el.style.animation);
-    if (animEls.length && 'IntersectionObserver' in window) {
+    if (!isOff('animpause') && animEls.length && 'IntersectionObserver' in window) {
       const bySec = new Map();
       animEls.forEach((el) => {
         const sec = el.closest('section');
@@ -164,9 +176,11 @@
       const t = e.touches && e.touches[0];
       if (t) writePupil(t.clientX / window.innerWidth - 0.5, t.clientY / window.innerHeight - 0.5);
     };
-    window.addEventListener('mousemove', onMove, { passive: true });
-    window.addEventListener('touchmove', onTouch, { passive: true });
-    window.addEventListener('touchstart', onTouch, { passive: true });
+    if (!isOff('pupil')) {
+      window.addEventListener('mousemove', onMove, { passive: true });
+      window.addEventListener('touchmove', onTouch, { passive: true });
+      window.addEventListener('touchstart', onTouch, { passive: true });
+    }
 
     // ---- reveal on scroll: each block/card fades + rises as it personally enters view ----
     const EASE = 'cubic-bezier(.22,.61,.36,1)';
@@ -227,7 +241,10 @@
         units.push(k);
       });
     });
-    if (reduceMotion) {
+    if (isOff('reveal')) {
+      // diagnostic: skip animation machinery entirely, just show everything as-is
+      units.forEach((k) => { k.style.transition = 'none'; k.style.opacity = '1'; k.style.transform = 'none'; });
+    } else if (reduceMotion) {
       units.forEach(show);
     } else {
       units.forEach((k) => {
