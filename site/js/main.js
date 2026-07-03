@@ -142,12 +142,39 @@
       [...bySec.keys()].forEach((sec) => animIO.observe(sec));
     }
 
-    // ---- pupil-follow disabled entirely ----
-    // Tried debouncing it against scroll, gating it to fine pointers only, isolating the
-    // blend layers around it -- none of it fully killed the trackpad stickiness, so rather
-    // than keep tuning a mousemove listener, it's removed outright. The eye stays fixed,
-    // centered, no JS touching it on move/scroll at all. Simplest possible test: if the
-    // stickiness is still there with zero mousemove listener on the page, it was never this.
+    // ---- pupil follows cursor / finger ONLY ----
+    // No idle animation and no CSS transition: the eye sits in a fixed, filtered, blend-mode
+    // layer, so ANY pupil movement forces that whole layer to repaint. We therefore move it
+    // only in direct response to input (rAF-coalesced) — while you're scrolling and not
+    // touching the eye, the pupil is completely static and costs nothing.
+    const pupils = [...root.querySelectorAll('[data-pupil]')];
+
+    let writeQueued = false, pendX = 0, pendY = 0;
+    const writePupil = (nx, ny) => {
+      pendX = nx; pendY = ny;
+      if (writeQueued) return;
+      writeQueued = true;
+      requestAnimationFrame(() => {
+        writeQueued = false;
+        pupils.forEach((p) => {
+          const amt = parseFloat(p.getAttribute('data-pupil')) || 7;
+          p.style.transform = `translate(${(pendX * amt).toFixed(2)}px, ${(pendY * amt).toFixed(2)}px)`;
+        });
+      });
+    };
+
+    // Fine pointer (mouse/trackpad) only: on touch the pupil no longer chases the finger
+    // during scroll — that was repainting the fixed eye layer on every touchmove and hitching
+    // the scroll. Coarse-pointer devices leave the eye static, staring straight ahead.
+    const finePointer = !(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    // While actively scrolling, ignore mousemove entirely: momentum scroll emits synthetic
+    // mousemoves, and moving the pupil repaints the filtered eye layer — that repaint is what
+    // makes trackpad scroll feel like it "sticks". The eye simply holds still as you scroll.
+    const onMove = (e) => {
+      if (performance.now() - lastScroll < 180) return;
+      writePupil(e.clientX / window.innerWidth - 0.5, e.clientY / window.innerHeight - 0.5);
+    };
+    if (finePointer) window.addEventListener('mousemove', onMove, { passive: true });
 
     // ---- reveal on scroll: each block/card fades + rises as it personally enters view ----
     const EASE = 'cubic-bezier(.22,.61,.36,1)';
