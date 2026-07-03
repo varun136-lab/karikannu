@@ -54,7 +54,7 @@
       const tint = smooth(t, 0.64, 1);
 
       // --- cheap, compositor-friendly updates: safe to run every frame ---
-      if (barEl) barEl.style.width = (t * 100).toFixed(2) + '%';
+      if (barEl) barEl.style.transform = `scaleX(${t.toFixed(4)})`;
       if (sunkenEl && sunkenSec) {
         // rTop (viewport-relative) derived from cached offset — no layout read
         const rTop = geo.secTop - y;
@@ -195,6 +195,28 @@
           if (k.getBoundingClientRect().top < (window.innerHeight || 800)) show(k);
         });
       }, 2500);
+    }
+
+    // ---- pause infinite jitter/glitch animations while their section is offscreen ----
+    // They otherwise animate transform/clip-path continuously for the whole page lifetime,
+    // keeping the compositor busy and stealing frames from scrolling.
+    const animEls = [...root.querySelectorAll('section [style]')].filter((el) => el.style.animationName || el.style.animation);
+    if (animEls.length && 'IntersectionObserver' in window) {
+      const bySec = new Map();
+      animEls.forEach((el) => {
+        const sec = el.closest('section');
+        if (!sec) return;
+        if (!bySec.has(sec)) bySec.set(sec, []);
+        bySec.get(sec).push(el);
+        el.style.animationPlayState = 'paused';
+      });
+      const animIO = new IntersectionObserver((entries) => {
+        entries.forEach((en) => {
+          const els = bySec.get(en.target) || [];
+          els.forEach((el) => { el.style.animationPlayState = en.isIntersecting ? 'running' : 'paused'; });
+        });
+      }, { rootMargin: '20% 0px 20% 0px' });
+      [...bySec.keys()].forEach((sec) => animIO.observe(sec));
     }
   });
 })();

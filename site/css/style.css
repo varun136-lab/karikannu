@@ -16,18 +16,11 @@ body { margin: 0; overflow-anchor: none; }
    as a visible line). A tiny overlap removes any gap for content to show through. */
 #page > section { margin-bottom: -2px; }
 
-/* backdrop-filter:blur() is one of the most expensive things a mobile GPU can
-   paint, and this page uses it on ~10 caption panels stacked over full-bleed
-   background photos. On phones that adds up to visibly stuck/sticky scrolling.
-   Drop the blur below the tablet breakpoint and lean on a more opaque solid
-   fill instead so the panels stay legible without the compositing cost. */
-@media (max-width: 820px) {
-  [style*="backdrop-filter"] {
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-    background-color: rgba(15, 7, 6, 0.86) !important;
-  }
-}
+/* backdrop-filter:blur() panels were replaced sitewide with solid,
+   higher-opacity backgrounds (see index.html caption/reveal panels) --
+   it was one of the most expensive things a mobile GPU can paint across
+   ~10 stacked panels. No element on the page uses backdrop-filter anymore,
+   so no override is needed here. */
 
 ::selection { background: #8a1414; color: #f0e2d0; }
 
