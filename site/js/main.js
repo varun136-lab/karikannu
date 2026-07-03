@@ -66,15 +66,31 @@
     window.addEventListener('resize', onScroll, { passive: true });
     apply();
 
-    // ---- pupil follows cursor / finger, with idle drift ----
-    let pupilTarget = { x: 0, y: 0 };
-    let pupilCur = { x: 0, y: 0 };
-    let lastPointer = 0;
+    // ---- pupil follows cursor / finger, with occasional idle drift ----
+    // No perpetual rAF: the eye is a fixed, filtered, blend-mode layer, so moving the pupil
+    // every frame would force that whole layer to recomposite 60x/sec and stall mobile.
+    // Instead we write the transform only on input (or a slow idle timer) and let a CSS
+    // transition ease it — the expensive layer repaints briefly and intermittently, never continuously.
+    const pupils = Array.from(root.querySelectorAll('[data-pupil]'));
+    pupils.forEach((p) => { p.style.transition = 'transform 1.1s cubic-bezier(.33,1,.68,1)'; });
 
+    let writeQueued = false;
+    const writePupil = (nx, ny) => {
+      if (writeQueued) return;
+      writeQueued = true;
+      requestAnimationFrame(() => {
+        writeQueued = false;
+        pupils.forEach((p) => {
+          const amt = parseFloat(p.getAttribute('data-pupil')) || 7;
+          p.style.transform = `translate(${(nx * amt).toFixed(2)}px, ${(ny * amt).toFixed(2)}px)`;
+        });
+      });
+    };
+
+    let lastPointer = 0;
     const setTargetFromPoint = (clientX, clientY) => {
-      pupilTarget.x = clientX / window.innerWidth - 0.5;
-      pupilTarget.y = clientY / window.innerHeight - 0.5;
       lastPointer = performance.now();
+      writePupil(clientX / window.innerWidth - 0.5, clientY / window.innerHeight - 0.5);
     };
     const onMove = (e) => setTargetFromPoint(e.clientX, e.clientY);
     const onTouch = (e) => {
@@ -85,25 +101,17 @@
     window.addEventListener('touchmove', onTouch, { passive: true });
     window.addEventListener('touchstart', onTouch, { passive: true });
 
-    // rAF loop: ease pupil toward target; when no pointer for a bit, drift on a slow lissajous
-    const pupils = Array.from(root.querySelectorAll('[data-pupil]'));
-    let pupilRAF = null;
-    const tick = (now) => {
-      const idle = now - lastPointer > 2200;
-      if (idle) {
-        const s = now / 1000;
-        pupilTarget.x = Math.sin(s * 0.6) * 0.42;
-        pupilTarget.y = Math.sin(s * 0.9 + 1.3) * 0.32;
-      }
-      pupilCur.x += (pupilTarget.x - pupilCur.x) * 0.08;
-      pupilCur.y += (pupilTarget.y - pupilCur.y) * 0.08;
-      pupils.forEach((p) => {
-        const amt = parseFloat(p.getAttribute('data-pupil')) || 7;
-        p.style.transform = `translate(${(pupilCur.x * amt).toFixed(2)}px, ${(pupilCur.y * amt).toFixed(2)}px)`;
-      });
-      pupilRAF = requestAnimationFrame(tick);
-    };
-    pupilRAF = requestAnimationFrame(tick);
+    // slow idle "searching" drift — a new gaze point every few seconds, CSS eases between them.
+    // Only ticks while the tab is visible; skips if the user just moved a pointer/finger.
+    let idleStep = 0;
+    setInterval(() => {
+      if (document.hidden) return;
+      if (performance.now() - lastPointer < 2600) return;
+      idleStep++;
+      const gx = Math.sin(idleStep * 1.7) * 0.4;
+      const gy = Math.sin(idleStep * 1.1 + 1.3) * 0.3;
+      writePupil(gx, gy);
+    }, 2600);
 
     // ---- reveal on scroll: each block/card fades + rises as it personally enters view ----
     const EASE = 'cubic-bezier(.22,.61,.36,1)';
@@ -170,13 +178,13 @@
         es.forEach((en) => { if (en.isIntersecting) { show(en.target); io.unobserve(en.target); } });
       }, { threshold: 0.12, rootMargin: '0px 0px -10% 0px' });
       units.forEach((k) => { if (!k._shown) io.observe(k); });
-      // targeted safety: reveal only items already at/above the fold that IO may have missed
+      // safety net: reveal above-the-fold items IO may have missed (keeps scroll-in for the rest)
       setTimeout(() => {
         units.forEach((k) => {
           if (k._shown) return;
           if (k.getBoundingClientRect().top < (window.innerHeight || 800)) show(k);
         });
-      }, 3500);
+      }, 2500);
     }
   });
 })();
