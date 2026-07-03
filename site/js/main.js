@@ -3,14 +3,6 @@
     const root = document;
     const rootEl = document.getElementById('page');
 
-    // ---- TEMP DIAGNOSTIC: ?disable=color,warmup,reveal,animpause,pupil (or ?disable=all) ----
-    // Lets us A/B individual subsystems live against the reported trackpad "sticky, need a
-    // second swipe after pausing" symptom without a redeploy per hypothesis. Safe to remove
-    // once the cause is found -- nothing here changes default behavior when the param is absent.
-    const __diagParams = new URLSearchParams(location.search);
-    const __disabled = new Set((__diagParams.get('disable') || '').split(',').map((s) => s.trim()).filter(Boolean));
-    const isOff = (name) => __disabled.has('all') || __disabled.has(name);
-
     // ---- color escalation model ----
     const mix = (a, b, f) => [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
     const pw = (stops, t) => {
@@ -64,7 +56,7 @@
       // --- cheap, compositor-friendly updates: safe to run every frame ---
       if (barEl) barEl.style.transform = `scaleX(${t.toFixed(4)})`;
       if (sunkenEl && sunkenSec) {
-        // rTop (viewport-relative) derived from cached offset — no layout read
+        // r.top (viewport-relative) derived from cached offset — no layout read
         const rTop = geo.secTop - y;
         let p = (window.innerHeight - rTop) / (window.innerHeight + geo.secH);
         p = Math.max(0, Math.min(1, p));
@@ -93,46 +85,46 @@
       if (eyeLabel) eyeLabel.style.opacity = (qt).toFixed(3);
     };
     let ticking = false;
-    const onScroll = () => { if (ticking) return; ticking = true; requestAnimationFrame(() => { ticking = false; apply(); }); };
+    let lastScroll = 0;
+    const onScroll = () => { lastScroll = performance.now(); if (ticking) return; ticking = true; requestAnimationFrame(() => { ticking = false; apply(); }); };
     const onResize = () => { measure(); onScroll(); };
-    if (!isOff('color')) {
-      window.addEventListener('scroll', onScroll, { passive: true });
-      window.addEventListener('resize', onResize, { passive: true });
-      // reveal transitions change section heights as they fade in — refresh cached geometry after they settle
-      setTimeout(measure, 1600);
-    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize, { passive: true });
+    // reveal transitions change section heights as they fade in — refresh cached geometry after they settle
+    setTimeout(measure, 1600);
     apply();
+
+    // ---- paint isolation: keep each section's paint contained, and push every big
+    // background/section image onto its own GPU layer so trackpad scroll only COMPOSITES
+    // them (moves an existing texture) instead of repainting on each momentum delta. ----
+    root.querySelectorAll('section').forEach((sec) => {
+      sec.style.contain = 'layout paint';
+    });
+    root.querySelectorAll('section img').forEach((im) => {
+      im.style.transform = (im.style.transform ? im.style.transform + ' ' : '') + 'translateZ(0)';
+      im.style.backfaceVisibility = 'hidden';
+    });
 
     // ---- warm-up: fetch + decode every image during idle time shortly after load,
     // so the first swipe never pays lazy-load / decode / first-raster cost mid-scroll ----
-    // Uses requestIdleCallback (not a flat setTimeout) so this genuinely only runs when
-    // the browser has spare main-thread time. A fixed-delay timer fires on schedule
-    // regardless of what else is happening -- if that happened to land while the user
-    // threw their first scroll, the decode work would compete with and could stall that
-    // gesture, which looks exactly like a scroll needing a second swipe to continue.
-    // requestIdleCallback is deferred automatically while the thread is busy handling
-    // scroll/input, and the timeout option guarantees it still runs eventually.
-    if (!isOff('warmup')) {
-      const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200));
-      ric(() => {
-        const imgs = [...root.querySelectorAll('img')];
-        let i = 0;
-        const next = () => {
-          if (i >= imgs.length) return;
-          const im = imgs[i++];
-          im.loading = 'eager';
-          const p = im.decode ? im.decode().catch(() => {}) : Promise.resolve();
-          p.then(() => { ric(next, { timeout: 1000 }); });
-        };
-        next();
-      }, { timeout: 2000 });
-    }
+    let warmTimer = setTimeout(() => {
+      const imgs = [...root.querySelectorAll('img')];
+      let i = 0;
+      const next = () => {
+        if (i >= imgs.length) return;
+        const im = imgs[i++];
+        im.loading = 'eager';
+        const p = im.decode ? im.decode().catch(() => {}) : Promise.resolve();
+        p.then(() => { warmTimer = setTimeout(next, 60); });
+      };
+      next();
+    }, 900);
 
     // ---- pause infinite jitter/glitch animations while their section is offscreen ----
     // They otherwise animate transform/clip-path continuously for the whole page lifetime,
     // keeping the compositor busy and stealing frames from scrolling.
     const animEls = [...root.querySelectorAll('section [style]')].filter((el) => el.style.animationName || el.style.animation);
-    if (!isOff('animpause') && animEls.length && 'IntersectionObserver' in window) {
+    if (animEls.length && 'IntersectionObserver' in window) {
       const bySec = new Map();
       animEls.forEach((el) => {
         const sec = el.closest('section');
@@ -150,15 +142,11 @@
       [...bySec.keys()].forEach((sec) => animIO.observe(sec));
     }
 
-    // ---- pupil follows cursor ONLY (mouse, not touch) ----
-    // On mobile the pupil used to chase your finger via touchmove/touchstart, which meant
-    // every touch-driven scroll gesture was also firing pupil-tracking writes on the same
-    // fixed, filtered, blend-mode eye layer. Reverted to mouse-only: touch devices don't
-    // fire mousemove at all, so the eye just stays put while scrolling on a phone.
+    // ---- pupil follows cursor / finger ONLY ----
     // No idle animation and no CSS transition: the eye sits in a fixed, filtered, blend-mode
     // layer, so ANY pupil movement forces that whole layer to repaint. We therefore move it
-    // only in direct response to input (rAF-coalesced) — while you're moving the mouse and
-    // not touching the eye, the pupil is completely static and costs nothing.
+    // only in direct response to input (rAF-coalesced) — while you're scrolling and not
+    // touching the eye, the pupil is completely static and costs nothing.
     const pupils = [...root.querySelectorAll('[data-pupil]')];
 
     let writeQueued = false, pendX = 0, pendY = 0;
@@ -175,10 +163,18 @@
       });
     };
 
-    const onMove = (e) => writePupil(e.clientX / window.innerWidth - 0.5, e.clientY / window.innerHeight - 0.5);
-    if (!isOff('pupil')) {
-      window.addEventListener('mousemove', onMove, { passive: true });
-    }
+    // Fine pointer (mouse/trackpad) only: on touch the pupil no longer chases the finger
+    // during scroll — that was repainting the fixed eye layer on every touchmove and hitching
+    // the scroll. Coarse-pointer devices leave the eye static, staring straight ahead.
+    const finePointer = !(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    // While actively scrolling, ignore mousemove entirely: momentum scroll emits synthetic
+    // mousemoves, and moving the pupil repaints the filtered eye layer — that repaint is what
+    // makes trackpad scroll feel like it "sticks". The eye simply holds still as you scroll.
+    const onMove = (e) => {
+      if (performance.now() - lastScroll < 180) return;
+      writePupil(e.clientX / window.innerWidth - 0.5, e.clientY / window.innerHeight - 0.5);
+    };
+    if (finePointer) window.addEventListener('mousemove', onMove, { passive: true });
 
     // ---- reveal on scroll: each block/card fades + rises as it personally enters view ----
     const EASE = 'cubic-bezier(.22,.61,.36,1)';
@@ -203,46 +199,22 @@
       return out.length ? out : [host];
     };
     const hide = (k) => { k.style.opacity = '0'; k.style.transform = 'translateY(22px)'; };
-    const revealDelay = new WeakMap();
     const show = (k) => {
-      // Promote to a GPU layer only right as the reveal starts, not up front for every
-      // unit on the page. With ~30+ revealable units, setting will-change at setup time
-      // for all of them (even ones several screens away) keeps that many layers composited
-      // simultaneously for the whole session, which is what was choking the compositor
-      // mid-fling on mobile (scroll needing a second swipe to keep going). Scoping the
-      // promotion to the ~1s window an element is actually animating keeps the concurrent
-      // layer count small no matter how far down the page you are.
-      //
-      // Rows of several cards (sightseers, motivators, episodes) all cross the reveal
-      // threshold in the same IntersectionObserver callback, i.e. the same JS tick. The
-      // CSS transition-delay already staggers when each card visually starts moving, but
-      // without this setTimeout every card in the row still gets its will-change / style
-      // write done synchronously in that one tick — a burst of simultaneous GPU layer
-      // promotions right in the middle of a scroll gesture. Deferring the actual write to
-      // match each card's own stagger spreads that work across a few frames instead.
-      k._shown = true;
-      const d = revealDelay.get(k) || 0;
-      setTimeout(() => {
-        k.style.willChange = 'opacity, transform';
-        k.style.opacity = '1'; k.style.transform = 'none';
-        // drop GPU promotion once the one-shot reveal is done — avoids permanently-composited layers
-        setTimeout(() => { k.style.willChange = 'auto'; }, 900);
-      }, d);
+      k.style.opacity = '1'; k.style.transform = 'none'; k._shown = true;
+      // drop GPU promotion once the one-shot reveal is done — avoids permanently-composited layers
+      setTimeout(() => { k.style.willChange = 'auto'; }, 900);
     };
     const vh = window.innerHeight || 800;
     const units = [];
     Array.from(root.querySelectorAll('[data-reveal]')).forEach((host) => {
       unitsOf(host).forEach((k, i) => {
+        k.style.willChange = 'opacity, transform';
         const d = (i % 3) * 80;
         k.style.transition = `opacity .7s ${EASE} ${d}ms, transform .8s ${EASE} ${d}ms`;
-        revealDelay.set(k, d);
         units.push(k);
       });
     });
-    if (isOff('reveal')) {
-      // diagnostic: skip animation machinery entirely, just show everything as-is
-      units.forEach((k) => { k.style.transition = 'none'; k.style.opacity = '1'; k.style.transform = 'none'; });
-    } else if (reduceMotion) {
+    if (reduceMotion) {
       units.forEach(show);
     } else {
       units.forEach((k) => {

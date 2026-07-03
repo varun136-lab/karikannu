@@ -24,14 +24,6 @@ body { margin: 0; overflow-anchor: none; }
 
 ::selection { background: #8a1414; color: #f0e2d0; }
 
-/* TEMP DIAGNOSTIC (?disable=paint or ?disable=all): strip the expensive-to-rasterize
-   effects -- mix-blend-mode, box-shadow, CSS filter -- to A/B whether scroll-triggered
-   repaint of these is behind the reported trackpad stickiness. Remove once resolved. */
-html.diag-nopaint [style*="mix-blend-mode"] { mix-blend-mode: normal !important; }
-html.diag-nopaint [style*="box-shadow"] { box-shadow: none !important; }
-html.diag-nopaint [style*="filter"] { filter: none !important; }
-html.diag-nopaint [style*="text-shadow"] { text-shadow: none !important; }
-
 @keyframes ret2-drift { 0%,100%{transform:translateY(0)} 50%{transform:translateY(8px)} }
 @keyframes ret2-spin { from{transform:rotate(0)} to{transform:rotate(360deg)} }
 @keyframes ret2-spinr { from{transform:rotate(0)} to{transform:rotate(-360deg)} }

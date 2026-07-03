@@ -9,24 +9,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
-<script>
-// TEMP DIAGNOSTIC: ?disable=paint (or ?disable=all) strips mix-blend-mode / box-shadow / filter
-// site-wide via CSS so we can A/B test whether paint/raster cost from those effects is behind
-// the reported trackpad stickiness. Runs before first paint so there's no flash. Remove once
-// the cause is confirmed -- inert when the param is absent.
-(function () {
-  var p = (new URLSearchParams(location.search).get('disable') || '').split(',');
-  if (p.indexOf('all') !== -1 || p.indexOf('paint') !== -1) document.documentElement.classList.add('diag-nopaint');
-})();
-</script>
 </head>
 <body>
 
 <div id="page" style="position:relative; overflow-x:hidden; font-family:'Inter',sans-serif; color:var(--ink); --ink:#1b2440; --accent:#2b3a60; --line:rgba(43,58,96,0.22);">
 
   <!-- ATMOSPHERE (all behind sections; images stay pristine) -->
-  <div data-bg style="position:fixed; inset:0; z-index:-10; background:#f6f4f0;"></div>
-  <div data-glow style="position:fixed; inset:0; z-index:-9; pointer-events:none; opacity:0; background:radial-gradient(130% 100% at 50% 78%, rgba(190,26,22,.62), transparent 66%);"></div>
+  <div data-bg style="position:fixed; inset:0; z-index:-10; background:#f6f4f0; transform:translateZ(0);"></div>
+  <div data-glow style="position:fixed; inset:0; z-index:-9; pointer-events:none; opacity:0; background:radial-gradient(130% 100% at 50% 78%, rgba(190,26,22,.62), transparent 66%); will-change:opacity; transform:translateZ(0);"></div>
   <div data-progress style="position:fixed; top:0; left:0; height:3px; width:100%; transform:scaleX(0); transform-origin:left center; z-index:60; background:linear-gradient(90deg, #2b3a60, #8a1414 58%, #e6231a); box-shadow:0 0 12px rgba(230,30,20,.5); transition:transform .12s linear; pointer-events:none;"></div>
   <div data-grain style="position:fixed; inset:0; z-index:-8; pointer-events:none; opacity:.09; background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E&quot;);"></div>
 
