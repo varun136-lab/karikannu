@@ -95,7 +95,15 @@
 
     // ---- warm-up: fetch + decode every image during idle time shortly after load,
     // so the first swipe never pays lazy-load / decode / first-raster cost mid-scroll ----
-    let warmTimer = setTimeout(() => {
+    // Uses requestIdleCallback (not a flat setTimeout) so this genuinely only runs when
+    // the browser has spare main-thread time. A fixed-delay timer fires on schedule
+    // regardless of what else is happening -- if that happened to land while the user
+    // threw their first scroll, the decode work would compete with and could stall that
+    // gesture, which looks exactly like a scroll needing a second swipe to continue.
+    // requestIdleCallback is deferred automatically while the thread is busy handling
+    // scroll/input, and the timeout option guarantees it still runs eventually.
+    const ric = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 0 }), 200));
+    ric(() => {
       const imgs = [...root.querySelectorAll('img')];
       let i = 0;
       const next = () => {
@@ -103,10 +111,10 @@
         const im = imgs[i++];
         im.loading = 'eager';
         const p = im.decode ? im.decode().catch(() => {}) : Promise.resolve();
-        p.then(() => { warmTimer = setTimeout(next, 60); });
+        p.then(() => { ric(next, { timeout: 1000 }); });
       };
       next();
-    }, 900);
+    }, { timeout: 2000 });
 
     // ---- pause infinite jitter/glitch animations while their section is offscreen ----
     // They otherwise animate transform/clip-path continuously for the whole page lifetime,
@@ -183,6 +191,7 @@
       return out.length ? out : [host];
     };
     const hide = (k) => { k.style.opacity = '0'; k.style.transform = 'translateY(22px)'; };
+    const revealDelay = new WeakMap();
     const show = (k) => {
       // Promote to a GPU layer only right as the reveal starts, not up front for every
       // unit on the page. With ~30+ revealable units, setting will-change at setup time
@@ -191,10 +200,22 @@
       // mid-fling on mobile (scroll needing a second swipe to keep going). Scoping the
       // promotion to the ~1s window an element is actually animating keeps the concurrent
       // layer count small no matter how far down the page you are.
-      k.style.willChange = 'opacity, transform';
-      k.style.opacity = '1'; k.style.transform = 'none'; k._shown = true;
-      // drop GPU promotion once the one-shot reveal is done — avoids permanently-composited layers
-      setTimeout(() => { k.style.willChange = 'auto'; }, 900);
+      //
+      // Rows of several cards (sightseers, motivators, episodes) all cross the reveal
+      // threshold in the same IntersectionObserver callback, i.e. the same JS tick. The
+      // CSS transition-delay already staggers when each card visually starts moving, but
+      // without this setTimeout every card in the row still gets its will-change / style
+      // write done synchronously in that one tick — a burst of simultaneous GPU layer
+      // promotions right in the middle of a scroll gesture. Deferring the actual write to
+      // match each card's own stagger spreads that work across a few frames instead.
+      k._shown = true;
+      const d = revealDelay.get(k) || 0;
+      setTimeout(() => {
+        k.style.willChange = 'opacity, transform';
+        k.style.opacity = '1'; k.style.transform = 'none';
+        // drop GPU promotion once the one-shot reveal is done — avoids permanently-composited layers
+        setTimeout(() => { k.style.willChange = 'auto'; }, 900);
+      }, d);
     };
     const vh = window.innerHeight || 800;
     const units = [];
@@ -202,6 +223,7 @@
       unitsOf(host).forEach((k, i) => {
         const d = (i % 3) * 80;
         k.style.transition = `opacity .7s ${EASE} ${d}ms, transform .8s ${EASE} ${d}ms`;
+        revealDelay.set(k, d);
         units.push(k);
       });
     });
