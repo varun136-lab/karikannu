@@ -93,12 +93,49 @@
     setTimeout(measure, 1600);
     apply();
 
+    // ---- warm-up: fetch + decode every image during idle time shortly after load,
+    // so the first swipe never pays lazy-load / decode / first-raster cost mid-scroll ----
+    let warmTimer = setTimeout(() => {
+      const imgs = [...root.querySelectorAll('img')];
+      let i = 0;
+      const next = () => {
+        if (i >= imgs.length) return;
+        const im = imgs[i++];
+        im.loading = 'eager';
+        const p = im.decode ? im.decode().catch(() => {}) : Promise.resolve();
+        p.then(() => { warmTimer = setTimeout(next, 60); });
+      };
+      next();
+    }, 900);
+
+    // ---- pause infinite jitter/glitch animations while their section is offscreen ----
+    // They otherwise animate transform/clip-path continuously for the whole page lifetime,
+    // keeping the compositor busy and stealing frames from scrolling.
+    const animEls = [...root.querySelectorAll('section [style]')].filter((el) => el.style.animationName || el.style.animation);
+    if (animEls.length && 'IntersectionObserver' in window) {
+      const bySec = new Map();
+      animEls.forEach((el) => {
+        const sec = el.closest('section');
+        if (!sec) return;
+        if (!bySec.has(sec)) bySec.set(sec, []);
+        bySec.get(sec).push(el);
+        el.style.animationPlayState = 'paused';
+      });
+      const animIO = new IntersectionObserver((entries) => {
+        entries.forEach((en) => {
+          const els = bySec.get(en.target) || [];
+          els.forEach((el) => { el.style.animationPlayState = en.isIntersecting ? 'running' : 'paused'; });
+        });
+      }, { rootMargin: '20% 0px 20% 0px' });
+      [...bySec.keys()].forEach((sec) => animIO.observe(sec));
+    }
+
     // ---- pupil follows cursor / finger ONLY ----
     // No idle animation and no CSS transition: the eye sits in a fixed, filtered, blend-mode
     // layer, so ANY pupil movement forces that whole layer to repaint. We therefore move it
     // only in direct response to input (rAF-coalesced) — while you're scrolling and not
     // touching the eye, the pupil is completely static and costs nothing.
-    const pupils = Array.from(root.querySelectorAll('[data-pupil]'));
+    const pupils = [...root.querySelectorAll('[data-pupil]')];
 
     let writeQueued = false, pendX = 0, pendY = 0;
     const writePupil = (nx, ny) => {
@@ -145,78 +182,40 @@
       });
       return out.length ? out : [host];
     };
-    // will-change is applied only for the brief moment an element is actually
-    // animating, then released — leaving it on permanently pins every revealed
-    // card in GPU memory for the rest of the session, which is what was making
-    // scrolling feel stuck/sticky on mobile once several sections had revealed.
-    const releaseWillChange = (k) => { k.style.willChange = 'auto'; };
     const hide = (k) => { k.style.opacity = '0'; k.style.transform = 'translateY(22px)'; };
     const show = (k) => {
-      k.style.willChange = 'opacity, transform';
-      k.style.opacity = '1';
-      k.style.transform = 'none';
-      k.addEventListener('transitionend', () => releaseWillChange(k), { once: true });
-      // safety net in case transitionend never fires (e.g. element hidden via display:none elsewhere)
-      setTimeout(() => releaseWillChange(k), 1200);
+      k.style.opacity = '1'; k.style.transform = 'none'; k._shown = true;
+      // drop GPU promotion once the one-shot reveal is done — avoids 68 permanently-composited layers
+      setTimeout(() => { k.style.willChange = 'auto'; }, 900);
     };
     const vh = window.innerHeight || 800;
     const units = [];
     Array.from(root.querySelectorAll('[data-reveal]')).forEach((host) => {
       unitsOf(host).forEach((k, i) => {
+        k.style.willChange = 'opacity, transform';
         const d = (i % 3) * 80;
         k.style.transition = `opacity .7s ${EASE} ${d}ms, transform .8s ${EASE} ${d}ms`;
         units.push(k);
       });
     });
     if (reduceMotion) {
-      units.forEach((k) => { k.style.opacity = '1'; k.style.transform = 'none'; });
+      units.forEach(show);
     } else {
       units.forEach((k) => {
         const r = k.getBoundingClientRect();
-        // already-visible units are shown instantly with no transition/will-change at all —
-        // they never animate, so there's nothing to promote to a GPU layer for.
-        if (r.top < vh * 0.92 && r.bottom > 0) {
-          k.style.transition = 'none';
-          k.style.opacity = '1';
-          k.style.transform = 'none';
-          k._shown = true;
-        } else {
-          hide(k);
-        }
+        if (r.top < vh * 0.92 && r.bottom > 0) { show(k); k._shown = true; } else { hide(k); }
       });
       const io = new IntersectionObserver((es) => {
         es.forEach((en) => { if (en.isIntersecting) { show(en.target); io.unobserve(en.target); } });
       }, { threshold: 0.12, rootMargin: '0px 0px -10% 0px' });
       units.forEach((k) => { if (!k._shown) io.observe(k); });
       // safety net: reveal above-the-fold items IO may have missed (keeps scroll-in for the rest)
-      setTimeout(() => {
+      let revTimer = setTimeout(() => {
         units.forEach((k) => {
           if (k._shown) return;
           if (k.getBoundingClientRect().top < (window.innerHeight || 800)) show(k);
         });
       }, 2500);
-    }
-
-    // ---- pause infinite jitter/glitch animations while their section is offscreen ----
-    // They otherwise animate transform/clip-path continuously for the whole page lifetime,
-    // keeping the compositor busy and stealing frames from scrolling.
-    const animEls = [...root.querySelectorAll('section [style]')].filter((el) => el.style.animationName || el.style.animation);
-    if (animEls.length && 'IntersectionObserver' in window) {
-      const bySec = new Map();
-      animEls.forEach((el) => {
-        const sec = el.closest('section');
-        if (!sec) return;
-        if (!bySec.has(sec)) bySec.set(sec, []);
-        bySec.get(sec).push(el);
-        el.style.animationPlayState = 'paused';
-      });
-      const animIO = new IntersectionObserver((entries) => {
-        entries.forEach((en) => {
-          const els = bySec.get(en.target) || [];
-          els.forEach((el) => { el.style.animationPlayState = en.isIntersecting ? 'running' : 'paused'; });
-        });
-      }, { rootMargin: '20% 0px 20% 0px' });
-      [...bySec.keys()].forEach((sec) => animIO.observe(sec));
     }
   });
 })();
