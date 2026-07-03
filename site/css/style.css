@@ -11,10 +11,15 @@
 html { background: #f6f4f0; overflow-anchor: none; }
 body { margin: 0; overflow-anchor: none; }
 
-/* Prevent hairline seams between stacked full-bleed sections on high-DPI mobile
-   screens (subpixel rounding can leave a fraction-of-a-pixel gap that renders
-   as a visible line). A tiny overlap removes any gap for content to show through. */
-#page > section { margin-bottom: -2px; }
+/* Bisection found this -2px overlap (added to hide a hairline seam between
+   stacked full-bleed sections) is the actual cause of trackpad scroll
+   stickiness: overlapping every section boundary forces the compositor to
+   resolve paint order between adjacent section layers continuously, and
+   trackpad's fine-grained scroll deltas cross far more of those boundaries
+   per second than a mouse wheel's coarse jumps. Removed. If the hairline
+   seam reappears on a high-DPI screen, fix it a different way (e.g. matching
+   background colors at the seam) rather than overlapping layers. */
+#page > section { margin-bottom: 0; }
 
 /* backdrop-filter:blur() panels were replaced sitewide with solid,
    higher-opacity backgrounds (see index.html caption/reveal panels) --
