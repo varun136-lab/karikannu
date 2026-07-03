@@ -184,15 +184,22 @@
     };
     const hide = (k) => { k.style.opacity = '0'; k.style.transform = 'translateY(22px)'; };
     const show = (k) => {
+      // Promote to a GPU layer only right as the reveal starts, not up front for every
+      // unit on the page. With ~30+ revealable units, setting will-change at setup time
+      // for all of them (even ones several screens away) keeps that many layers composited
+      // simultaneously for the whole session, which is what was choking the compositor
+      // mid-fling on mobile (scroll needing a second swipe to keep going). Scoping the
+      // promotion to the ~1s window an element is actually animating keeps the concurrent
+      // layer count small no matter how far down the page you are.
+      k.style.willChange = 'opacity, transform';
       k.style.opacity = '1'; k.style.transform = 'none'; k._shown = true;
-      // drop GPU promotion once the one-shot reveal is done — avoids 68 permanently-composited layers
+      // drop GPU promotion once the one-shot reveal is done — avoids permanently-composited layers
       setTimeout(() => { k.style.willChange = 'auto'; }, 900);
     };
     const vh = window.innerHeight || 800;
     const units = [];
     Array.from(root.querySelectorAll('[data-reveal]')).forEach((host) => {
       unitsOf(host).forEach((k, i) => {
-        k.style.willChange = 'opacity, transform';
         const d = (i % 3) * 80;
         k.style.transition = `opacity .7s ${EASE} ${d}ms, transform .8s ${EASE} ${d}ms`;
         units.push(k);
