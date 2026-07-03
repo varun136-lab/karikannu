@@ -8,8 +8,8 @@
   font-display: swap;
 }
 
-html { background: #f6f4f0; }
-body { margin: 0; }
+html { background: #f6f4f0; overflow-anchor: none; }
+body { margin: 0; overflow-anchor: none; }
 
 /* Prevent hairline seams between stacked full-bleed sections on high-DPI mobile
    screens (subpixel rounding can leave a fraction-of-a-pixel gap that renders
