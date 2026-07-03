@@ -30,88 +30,98 @@
     const sunkenEl = root.querySelector('[data-sunken]');
     const sunkenSec = sunkenEl ? sunkenEl.closest('section') : null;
 
-    const apply = () => {
+    // Cache scroll geometry so the per-frame handler never calls getBoundingClientRect()
+    // (a forced synchronous reflow that hitches scrolling, worst when blend layers are busy).
+    // Recomputed only on resize / load, not on every scroll frame.
+    const geo = { max: 1, secTop: 0, secH: 0 };
+    const measure = () => {
       const doc = document.documentElement;
-      const max = (doc.scrollHeight - window.innerHeight) || 1;
-      const t = Math.min(1, Math.max(0, window.scrollY / max));
-      const bg = pw(BG, t), ink = pw(INK, t), acc = pw(ACC, t);
+      geo.max = (doc.scrollHeight - window.innerHeight) || 1;
+      if (sunkenSec) {
+        const y = window.scrollY;
+        const r = sunkenSec.getBoundingClientRect();
+        geo.secTop = r.top + y; // absolute document offset
+        geo.secH = r.height;
+      }
+    };
+    measure();
+    if (document.readyState !== 'complete') window.addEventListener('load', measure, { once: true });
+
+    let lastQt = null, lastQp = null;
+    const apply = () => {
+      const y = window.scrollY;
+      const t = Math.min(1, Math.max(0, y / geo.max));
       const tint = smooth(t, 0.64, 1);
+
+      // --- cheap, compositor-friendly updates: safe to run every frame ---
+      if (barEl) barEl.style.width = (t * 100).toFixed(2) + '%';
+      if (sunkenEl && sunkenSec) {
+        // rTop (viewport-relative) derived from cached offset — no layout read
+        const rTop = geo.secTop - y;
+        let p = (window.innerHeight - rTop) / (window.innerHeight + geo.secH);
+        p = Math.max(0, Math.min(1, p));
+        sunkenEl.style.transform = `translateY(${(p * geo.secH).toFixed(1)}px) rotate(${(p * 5).toFixed(2)}deg)`;
+      }
+
+      // --- EXPENSIVE writes (filter / background / blend-layer opacities) repaint the big
+      //     fixed blend-mode layers. Only touch them when the quantized tint actually changes,
+      //     so a normal scroll doesn't re-rasterize those layers on every single frame. ---
+      const qt = Math.round(tint * 24) / 24;
+      const qp = Math.round(t * 24) / 24;
+      if (qt === lastQt && qp === lastQp) return;
+      lastQt = qt; lastQp = qp;
+      const bg = pw(BG, qp), ink = pw(INK, qp), acc = pw(ACC, qp);
       if (rootEl) {
         rootEl.style.setProperty('--ink', rgb(ink));
         rootEl.style.setProperty('--accent', rgb(acc));
-        rootEl.style.setProperty('--line', `rgba(${acc[0] | 0},${acc[1] | 0},${acc[2] | 0},${(0.18 + 0.4 * tint).toFixed(3)})`);
+        rootEl.style.setProperty('--line', `rgba(${acc[0] | 0},${acc[1] | 0},${acc[2] | 0},${(0.18 + 0.4 * qt).toFixed(3)})`);
       }
       if (bgEl) bgEl.style.background = rgb(bg);
-      if (glowEl) glowEl.style.opacity = (tint * 0.8).toFixed(3);
-      if (eyeEl) eyeEl.style.filter = `drop-shadow(0 0 ${(tint * 18).toFixed(1)}px rgba(214,34,26,${(tint * 0.95).toFixed(2)}))`;
-      if (eyeStar) eyeStar.style.transform = `scale(${(1 + tint * 0.5).toFixed(3)})`;
-      if (eyeRedEl) eyeRedEl.style.opacity = tint.toFixed(3);
-      if (veinsEl) veinsEl.style.opacity = (tint * 0.9).toFixed(3);
-      if (eyeLabel) eyeLabel.style.opacity = (tint).toFixed(3);
-      if (barEl) barEl.style.width = (t * 100).toFixed(2) + '%';
-      if (sunkenEl && sunkenSec) {
-        const r = sunkenSec.getBoundingClientRect();
-        const vhh = window.innerHeight || 800;
-        // 0 as the section enters from the bottom, 1 as it exits the top
-        let p = (vhh - r.top) / (vhh + r.height);
-        p = Math.max(0, Math.min(1, p));
-        // fall the full section height, then overflow:hidden clips it behind the next section
-        const fall = p * r.height;
-        sunkenEl.style.transform = `translateY(${fall.toFixed(1)}px) rotate(${(p * 5).toFixed(2)}deg)`;
-      }
+      if (glowEl) glowEl.style.opacity = (qt * 0.8).toFixed(3);
+      if (eyeEl) eyeEl.style.filter = qt > 0.01 ? `drop-shadow(0 0 ${(qt * 18).toFixed(1)}px rgba(214,34,26,${(qt * 0.95).toFixed(2)}))` : 'none';
+      if (eyeStar) eyeStar.style.transform = `scale(${(1 + qt * 0.5).toFixed(3)})`;
+      if (eyeRedEl) eyeRedEl.style.opacity = qt.toFixed(3);
+      if (veinsEl) veinsEl.style.opacity = (qt * 0.9).toFixed(3);
+      if (eyeLabel) eyeLabel.style.opacity = (qt).toFixed(3);
     };
     let ticking = false;
     const onScroll = () => { if (ticking) return; ticking = true; requestAnimationFrame(() => { ticking = false; apply(); }); };
+    const onResize = () => { measure(); onScroll(); };
     window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll, { passive: true });
+    window.addEventListener('resize', onResize, { passive: true });
+    // reveal transitions change section heights as they fade in — refresh cached geometry after they settle
+    setTimeout(measure, 1600);
     apply();
 
-    // ---- pupil follows cursor / finger, with occasional idle drift ----
-    // No perpetual rAF: the eye is a fixed, filtered, blend-mode layer, so moving the pupil
-    // every frame would force that whole layer to recomposite 60x/sec and stall mobile.
-    // Instead we write the transform only on input (or a slow idle timer) and let a CSS
-    // transition ease it — the expensive layer repaints briefly and intermittently, never continuously.
+    // ---- pupil follows cursor / finger ONLY ----
+    // No idle animation and no CSS transition: the eye sits in a fixed, filtered, blend-mode
+    // layer, so ANY pupil movement forces that whole layer to repaint. We therefore move it
+    // only in direct response to input (rAF-coalesced) — while you're scrolling and not
+    // touching the eye, the pupil is completely static and costs nothing.
     const pupils = Array.from(root.querySelectorAll('[data-pupil]'));
-    pupils.forEach((p) => { p.style.transition = 'transform 1.1s cubic-bezier(.33,1,.68,1)'; });
 
-    let writeQueued = false;
+    let writeQueued = false, pendX = 0, pendY = 0;
     const writePupil = (nx, ny) => {
+      pendX = nx; pendY = ny;
       if (writeQueued) return;
       writeQueued = true;
       requestAnimationFrame(() => {
         writeQueued = false;
         pupils.forEach((p) => {
           const amt = parseFloat(p.getAttribute('data-pupil')) || 7;
-          p.style.transform = `translate(${(nx * amt).toFixed(2)}px, ${(ny * amt).toFixed(2)}px)`;
+          p.style.transform = `translate(${(pendX * amt).toFixed(2)}px, ${(pendY * amt).toFixed(2)}px)`;
         });
       });
     };
 
-    let lastPointer = 0;
-    const setTargetFromPoint = (clientX, clientY) => {
-      lastPointer = performance.now();
-      writePupil(clientX / window.innerWidth - 0.5, clientY / window.innerHeight - 0.5);
-    };
-    const onMove = (e) => setTargetFromPoint(e.clientX, e.clientY);
+    const onMove = (e) => writePupil(e.clientX / window.innerWidth - 0.5, e.clientY / window.innerHeight - 0.5);
     const onTouch = (e) => {
       const t = e.touches && e.touches[0];
-      if (t) setTargetFromPoint(t.clientX, t.clientY);
+      if (t) writePupil(t.clientX / window.innerWidth - 0.5, t.clientY / window.innerHeight - 0.5);
     };
     window.addEventListener('mousemove', onMove, { passive: true });
     window.addEventListener('touchmove', onTouch, { passive: true });
     window.addEventListener('touchstart', onTouch, { passive: true });
-
-    // slow idle "searching" drift — a new gaze point every few seconds, CSS eases between them.
-    // Only ticks while the tab is visible; skips if the user just moved a pointer/finger.
-    let idleStep = 0;
-    setInterval(() => {
-      if (document.hidden) return;
-      if (performance.now() - lastPointer < 2600) return;
-      idleStep++;
-      const gx = Math.sin(idleStep * 1.7) * 0.4;
-      const gy = Math.sin(idleStep * 1.1 + 1.3) * 0.3;
-      writePupil(gx, gy);
-    }, 2600);
 
     // ---- reveal on scroll: each block/card fades + rises as it personally enters view ----
     const EASE = 'cubic-bezier(.22,.61,.36,1)';
